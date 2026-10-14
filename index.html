@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Flood Risk Map</title>
+    <!-- Leaflet CDN -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        #map { height: 80vh; }
+        .info-panel {
+            position: absolute;
+            top:10px;
+            left:10px;
+            background:white;
+            padding:10px;
+            z-index:1000;
+            border-radius:4px;
+        }
+        .legend {
+            position:absolute;
+            bottom:10px;
+            left:10px;
+            background:white;
+            padding:10px;
+            z-index:1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="info-panel">
+        <h4>Stats</h4>
+        <div id="stats-text">Loading...</div>
+    </div>
+    <div class="legend">
+        <b>Legend</b><br/>
+        <span style="display:inline-block;width:15px;height:15px;background:#fed976"></span> 0–0.2m<br/>
+        <span style="display:inline-block;width:15px;height:15px;background:#fd8d3c"></span> 0.2–0.5m<br/>
+        <span style="display:inline-block;width:15px;height:15px;background:#e31a1c"></span> >0.5m<br/>
+        <span style="display:inline-block;width:15px;height:15px;background:red;border-radius:50%"></span> Flooded School<br/>
+        <span style="display:inline-block;width:15px;height:15px;background:blue;border-radius:50%"></span> Normal School
+    </div>
+
+    <script>
+        const map = L.map('map').setView([59.3293, 18.0686], 11); // Stockholm
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        // 洪水图层
+        fetch('http://localhost:3000/api/flood')
+            .then(res=>res.json())
+            .then(data=>{
+                L.geoJSON(data,{
+                    style:feature=>{
+                        const d = feature.properties.depth;
+                        if(d<0.2) return {fillColor:"#fed976", color:"#fed976", fillOpacity:0.6};
+                        else if(d<0.5) return {fillColor:"#fd8d3c", color:"#fd8d3c", fillOpacity:0.6};
+                        else return {fillColor:"#e31a1c", color:"#e31a1c", fillOpacity:0.6};
+                    },
+                    onEachFeature:(f,layer)=>{
+                        layer.bindPopup(`Depth: ${f.properties.depth.toFixed(2)} m`)
+                    }
+                }).addTo(map);
+            })
+
+        // 学校点位
+        fetch('http://localhost:3000/api/schools')
+            .then(res=>res.json())
+            .then(data=>{
+                L.geoJSON(data,{
+                    pointToLayer:(f,latlng)=>{
+                        const color = f.properties.is_flooded ? "red":"blue";
+                        return L.circleMarker(latlng, {radius:6, fillColor:color, color:color, fillOpacity:0.8})
+                    },
+                    onEachFeature:(f,layer)=>{
+                        layer.bindPopup(`School: ${f.properties.note}<br/>Flooded: ${f.properties.is_flooded}`)
+                    }
+                }).addTo(map);
+            })
+
+        // 统计面板
+        fetch('http://localhost:3000/api/stats')
+            .then(res=>res.json())
+            .then(stats=>{
+                document.getElementById("stats-text").innerHTML = `
+                Total schools: ${stats.total_schools}<br/>
+                Flooded schools: ${stats.flooded_schools}<br/>
+                Flood area: ${Number(stats.flood_area_m2).toFixed(0)} m²
+                `
+            })
+    </script>
+</body>
+</html>

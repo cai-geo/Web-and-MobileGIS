@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stockholm Flood Risk Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+* {
+box-sizing: border-box;
+font-family: Arial, sans-serif;
+}
+html, body {
+height: 100%;
+margin: 0;
+padding: 0;
+overflow: hidden;
+}
+#map {
+width: 100%;
+height: 100%;
+}
+.top-panel {
+position: absolute;
+top:12px;
+left:12px;
+z-index:1000;
+background:#ffffff;
+padding:10px 12px;
+border-radius:8px;
+box-shadow:0 1px 4px rgba(0,0,0.25);
+display:flex;
+flex-direction:column;
+gap:8px;
+}
+.panel-row {
+display:flex;
+gap:8px;
+align-items:center;
+flex-wrap:wrap;
+}
+button, select, label {
+font-size:14px;
+padding:5px 8px;
+border:1px solid #ccc;
+border-radius:4px;
+background:#fff;
+}
+button {
+background:#222;
+color:white;
+border:none;
+}
+button:hover {
+background:#444;
+}
+.stat-box {
+position:absolute;
+top:12px;
+right:12px;
+z-index:1000;
+background:#fff;
+padding:10px 14px;
+border-radius:8px;
+box-shadow:0 1px 4px rgba(0,0,0.25);
+font-weight:bold;
+font-size:15px;
+white-space: pre-line;
+}
+.loading-box {
+position:absolute;
+top:70px;
+right:12px;
+z-index:1000;
+background:#fff;
+padding:8px 12px;
+border-radius:8px;
+box-shadow:0 1px 4px rgba(0,0,0.25);
+font-size:13px;
+display:none;
+}
+.legend {
+position:absolute;
+bottom:12px;
+right:12px;
+z-index:1000;
+background:#fff;
+padding:10px 12px;
+border-radius:8px;
+box-shadow:0 1px 4px rgba(0,0,0.25);
+font-size:14px;
+}
+.legend-item {
+display:flex;
+align-items:center;
+gap:6px;
+margin:4px 0;
+}
+.dot {
+width:14px;
+height:14px;
+border-radius:50%;
+border:1px solid white;
+}
+.red-dot {background:#e63946;}
+.blue-dot {background:#1d6fa5;}
+.blue-polygon {background:#3388dd;opacity:0.4;}
+.orange-dot {background:orange;}
+.coord-panel {
+position:absolute;
+bottom:12px;
+left:12px;
+z-index:1000;
+background:#fff;
+padding:6px 10px;
+border-radius:6px;
+font-size:13px;
+box-shadow:0 1px 4px rgba(0,0,0.25);
+}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="top-panel">
+<div class="panel-row">
+<label>Scenario:</label>
+<select id="scenarioSelect">
+<option value="Q200">Q200</option>
+<option value="QBHF">QBHF</option>
+</select>
+</div>
+<div class="panel-row">
+<label><input type="checkbox" checked id="toggleSchools"> Show Schools</label>
+<label><input type="checkbox" checked id="toggleFlood"> Show Flood Area</label>
+</div>
+<div class="panel-row">
+<label><input type="checkbox" id="toggleBuildings"> Buildings</label>
+<label><input type="checkbox" id="toggleRoads"> Roads</label>
+<label><input type="checkbox" id="toggleWater"> Water</label>
+<label><input type="checkbox" id="toggleBus"> Bus Stops</label>
+</div>
+<div class="panel-row">
+<button id="reloadBtn">Reload Data</button>
+<button id="resetViewBtn">Reset View</button>
+</div>
+</div>
+<div class="stat-box" id="statText">Loading stats...</div>
+<div class="loading-box" id="loadingBox">Fetching data...</div>
+<div class="legend">
+<div><b>Legend</b></div>
+<div class="legend-item"><span class="dot red-dot"></span> Flooded School</div>
+<div class="legend-item"><span class="dot blue-dot"></span> Safe School</div>
+<div class="legend-item"><span class="dot blue-polygon"></span> Flood extent</div>
+<div class="legend-item"><span class="dot orange-dot"></span> Bus Stop</div>
+</div>
+<div class="coord-panel" id="coordDisplay">Lng: — , Lat: —</div>
+
+<script>
+const MAPBOX_TOKEN = "pk.eyJ1IjoiY2J0LTAyMDIiLCJhIjoiY211d3EwMWV0MDB0cDJ6c2Rkc3FiamxndyJ9.1GgOzLV6fDYwXiN0jIg9HQ";
+const map = L.map('map').setView([59.3293, 18.0686], 11);
+const initialView = {
+    center: [59.3293, 18.0686],
+    zoom: 11
+};
+
+L.tileLayer(`https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
+tileSize: 512,
+zoomOffset: -1,
+maxZoom: 22,
+attribution: '&copy; Mapbox & OpenStreetMap contributors'
+}).addTo(map);
+
+let floodLayer = L.geoJSON(null, {
+style: {
+fillColor: "#3388dd",
+fillOpacity: 0.3,
+color: "#0f4880",
+weight: 1.2
+    }
+}).addTo(map);
+let schoolLayer = L.geoJSON(null, {
+pointToLayer: function (feature, latlng) {
+const p = feature.properties;
+const raw = p.is_flooded;
+const isFlooded = raw === true || raw === "true";
+console.log("School:", p.skola, "raw is_flooded =", raw, "isFlooded?", isFlooded);
+return L.circleMarker(latlng, {
+radius: 9,
+fillColor: isFlooded ? "#e63946" : "#1d6fa5",
+fillOpacity: 0.9,
+stroke: true,
+color: "#ffffff",
+weight: 2
+        });
+    },
+onEachFeature: function (feature, layer) {
+const p = feature.properties;
+const raw = p.is_flooded;
+const isFlooded = raw === true || raw === "true";
+const status = isFlooded ? "⚠️ Flooded" : "✅ Safe";
+layer.bindPopup(`
+            <b>${status}</b><br>
+            ID: ${p.id}<br>
+            Name: ${p.skola}<br>
+            Address: ${p.adress}<br>
+            Postort: ${p.postort}<br>
+            raw is_flooded: ${p.is_flooded}
+        `);
+    }
+}).addTo(map);
+
+const layerBuildings = L.geoJSON(null, {
+style: {color:'#666666', fillColor:'#aaaaaa', fillOpacity:0.6, weight:1},
+onEachFeature: (feature, layer)=>{
+    layer.bindPopup(`Building ID: ${feature.properties.id || "N/A"}`)
+}
+});
+const layerRoads = L.geoJSON(null, {
+style: {color:'#557799', weight:2}
+});
+const layerWater = L.geoJSON(null, {
+style: {color:'#2277bb', fillColor:'#66aadd', fillOpacity:0.5, weight:1}
+});
+const layerBus = L.geoJSON(null, {
+pointToLayer: (feature, latlng) => {
+return L.circleMarker(latlng, {radius:4, fillColor:'orange', fillOpacity:0.8, weight:1})
+  },
+onEachFeature: (feature, layer) => {
+layer.bindPopup(`Bus stop: ${feature.properties.name || "Unnamed"}`)
+  }
+});
+
+let staticLayersLoaded = false;
+
+async function loadStaticBaseLayers() {
+if(staticLayersLoaded) return;
+try{
+const bRes = await fetch(`/api/buildings`);
+const bGeo = await bRes.json();
+layerBuildings.addData(bGeo);
+
+const rRes = await fetch(`/api/roads`);
+const rGeo = await rRes.json();
+layerRoads.addData(rGeo);
+
+const busRes = await fetch(`/api/bus_stops`);
+const busGeo = await busRes.json();
+layerBus.addData(busGeo);
+
+staticLayersLoaded = true;
+  }catch(err){
+console.error("Base layers load error", err);
+  }
+}
+
+async function loadSchools(scenario) {
+try {
+const res = await fetch(`/api/schools?scenario=${scenario}`);
+const geojson = await res.json();
+console.log("School GeoJSON received:", geojson);
+schoolLayer.clearLayers();
+schoolLayer.addData(geojson);
+if(document.getElementById("toggleSchools").checked){
+if(!map.hasLayer(schoolLayer)) schoolLayer.addTo(map);
+        }else{
+if(map.hasLayer(schoolLayer)) map.removeLayer(schoolLayer);
+        }
+return geojson;
+    } catch(err) {
+console.error("loadSchools error", err);
+return null;
+    }
+}
+
+async function loadFloodAndStats(scenario) {
+const loadingBox = document.getElementById("loadingBox");
+loadingBox.style.display = "block";
+try {
+// 加载洪水图层
+const floodRes = await fetch(`/api/flood?scenario=${scenario}`);
+const floodGeo = await floodRes.json();
+floodLayer.clearLayers();
+floodLayer.addData(floodGeo);
+if(document.getElementById("toggleFlood").checked){
+if(!map.hasLayer(floodLayer)) floodLayer.addTo(map);
+        }else{
+if(map.hasLayer(floodLayer)) map.removeLayer(floodLayer);
+        }
+
+await loadSchools(scenario);
+// 调用后端统计接口，直接获取3个数字
+const statRes = await fetch(`/api/stats?scenario=${scenario}`);
+const statData = await statRes.json();
+
+document.getElementById("statText").innerText = 
+`Flooded Schools: ${statData.floodedSchools}
+Affected Bus Stops: ${statData.affectedBus}
+Affected Buildings: ${statData.affectedBuildings}`;
+
+    } catch(err) {
+console.error("load flood error", err);
+document.getElementById("statText").innerText = "Error loading data";
+    } finally {
+loadingBox.style.display = "none";
+    }
+}
+
+document.getElementById("scenarioSelect").addEventListener("change", e=>{
+loadFloodAndStats(e.target.value);
+});
+document.getElementById("toggleSchools").addEventListener("change", e=>{
+if(e.target.checked) schoolLayer.addTo(map);
+else map.removeLayer(schoolLayer);
+});
+document.getElementById("toggleFlood").addEventListener("change", e=>{
+if(e.target.checked) floodLayer.addTo(map);
+else map.removeLayer(floodLayer);
+});
+document.getElementById("reloadBtn").addEventListener("click", ()=>{
+loadFloodAndStats(document.getElementById("scenarioSelect").value);
+});
+document.getElementById("resetViewBtn").addEventListener("click", ()=>{
+    map.setView(initialView.center, initialView.zoom);
+});
+map.on('mousemove', function(e) {
+    const lng = e.latlng.lng.toFixed(4);
+    const lat = e.latlng.lat.toFixed(4);
+    document.getElementById("coordDisplay").innerText = `Lng: ${lng} , Lat: ${lat}`;
+});
+
+document.getElementById("toggleBuildings").addEventListener("change", e=>{
+if(e.target.checked) layerBuildings.addTo(map);
+else map.removeLayer(layerBuildings);
+})
+document.getElementById("toggleRoads").addEventListener("change", e=>{
+if(e.target.checked) layerRoads.addTo(map);
+else map.removeLayer(layerRoads);
+})
+document.getElementById("toggleWater").addEventListener("change", e=>{
+if(e.target.checked) layerWater.addTo(map);
+else map.removeLayer(layerWater);
+})
+document.getElementById("toggleBus").addEventListener("change", e=>{
+if(e.target.checked) layerBus.addTo(map);
+else map.removeLayer(layerBus);
+})
+
+window.onload = async ()=>{
+await loadStaticBaseLayers();
+await loadFloodAndStats("Q200");
+};
+</script>
+</body>
+</html>
